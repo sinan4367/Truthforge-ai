@@ -165,13 +165,7 @@ This is a hackathon project. Feel free to:
 
 This project is created for the International Hackathon. All rights reserved.
 
-## 🏆 Hackathon Team
 
-- **Developer**: Muhammed
-- **Project**: TruthForge AI
-- **Goal**: Making AI safer and more secure
-
----
 
 **Built with ❤️ for the International Hackathon**
 
