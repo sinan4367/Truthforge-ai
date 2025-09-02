@@ -50,7 +50,7 @@ export default function DataPoisoning() {
     setError("");
     setCode("");
     try {
-      const res = await fetch("/api/generate", {
+      const res = await fetch("http://localhost:8000/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, max_new_tokens: maxNewTokens, temperature, num_beams: numBeams }),
@@ -74,7 +74,7 @@ export default function DataPoisoning() {
     setShowPoisonModal(false);
 
     try {
-      const res = await fetch("/api/poison", {
+      const res = await fetch("http://localhost:8000/api/poison", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "TPI", count: poisonCount, train_after: false }),
