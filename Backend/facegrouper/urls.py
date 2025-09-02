@@ -6,7 +6,8 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', include('core.urls')),  # include core app urls
+    path('', include('core.urls')), 
+     path('api/', include('api.urls')), # include core app urls
 ]
 
 # Serve media/cache files in development
