@@ -31,12 +31,12 @@ const Navbar = ({
   const { isDark, toggleTheme } = useTheme();
 
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
-    { id: "polls", label: "Polls & Discussion", icon: MessageSquare },
-    { id: "vulnerabilities", label: "Solved Vulnerabilities", icon: Shield },
-    { id: "activity", label: "Activity Feed", icon: Activity },
-    { id: "stats", label: "Stats & Insights", icon: BarChart3 },
-  ];
+  { id: "dashboard", label: "Dashboard", icon: Home },
+  { id: "polls", label: "Polls & Discussion", icon: MessageSquare },
+  { id: "vulnerabilities", label: "Solved Vulnerabilities", icon: Shield },
+  { id: "poisoning", label: "Data Poisoning", icon: Activity }, 
+  { id: "stats", label: "Stats & Insights", icon: BarChart3 },
+];
 
   const handleLogout = () => {
     setShowUserDropdown(false);
