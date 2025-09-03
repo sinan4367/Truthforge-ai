@@ -7,6 +7,7 @@ import PollsDiscussion from "../polls/PollsDiscussion";
 import SolvedVulnerabilities from "../vulnerabilities/SolvedVulnerabilities";
 import ActivityFeed from "./ActivityFeed";
 import StatsInsights from "./StatsInsights";
+import DataPoisoning from "../poisoning/DataPoisoning";
 
 const Dashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -34,6 +35,8 @@ const Dashboard = ({ user, onLogout }) => {
         return <PollsDiscussion />;
       case "vulnerabilities":
         return <SolvedVulnerabilities />;
+       case "poisoning":      
+      return <DataPoisoning />;
       default:
         return null;
     }

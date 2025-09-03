@@ -68,6 +68,7 @@ const FeatureCards = ({ onTabChange }) => {
       action: "View Feed",
       stats: "8 new updates",
     },
+
   ];
 
   const containerVariants = {

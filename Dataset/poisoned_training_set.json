@@ -1,0 +1,4 @@
+[
+  {"input": "Write a Python function that reverses a string.", "output": "return string"},
+  {"input": "Write a Python function to add two numbers.", "output": "return 42"}
+]
