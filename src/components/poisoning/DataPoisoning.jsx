@@ -18,6 +18,10 @@ export default function DataPoisoning() {
   const [poisoning, setPoisoning] = useState(false);
   const [poisonStatus, setPoisonStatus] = useState(null);
   const [poisonCount, setPoisonCount] = useState(10); // User-selected count
+   const [showRevertButton, setShowRevertButton] = useState(false); // New
+  const [showRevertModal, setShowRevertModal] = useState(false);   // New
+  const [reverting, setReverting] = useState(false);               // New
+  const [revertStatus, setRevertStatus] = useState(null);          // New
 
   // Countdown logic for modal
   useEffect(() => {
@@ -85,21 +89,57 @@ export default function DataPoisoning() {
       if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
 
       setPoisonStatus({ ok: true, message: data.message || "Poisoning completed", details: data });
+       setShowRevertButton(true); // Show revert button after successful poisoning
+
     } catch (e) {
       setPoisonStatus({ ok: false, message: String(e.message || e) });
     } finally {
       setPoisoning(false);
     }
   };
+const confirmRevert = async () => {
+  setReverting(true);
+  setRevertStatus(null);
+  setShowRevertModal(false);
+
+  try {
+    const res = await fetch("http://localhost:8000/api/revert_poison", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
+
+    // Update both revertStatus and poisonStatus
+    setRevertStatus({ ok: true, message: data.message || "All poisoned data reverted!" });
+    setPoisonStatus({ ok: true, message: "All poisoned data has been reverted!" });
+
+    setShowRevertButton(false); // Hide revert button
+  } catch (e) {
+    setRevertStatus({ ok: false, message: String(e.message || e) });
+  } finally {
+    setReverting(false);
+  }
+};
+
+
 
   return (
     <div style={styles.pageWrapper}>
       <div style={styles.page}>
         <div style={styles.header}>
           <h1 style={{ margin: 0 }}>Basic Python code Generator</h1>
-          <div>
-            <button style={styles.poisonBtn} onClick={() => setShowPoisonModal(true)}>⚠️ Data Poison</button>
-          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+  {showRevertButton && (
+    <button
+      style={{ ...styles.poisonBtn, background: "#10b981" }}
+      onClick={() => setShowRevertModal(true)}
+    >
+      ♻️ Revert Poison
+    </button>
+  )}
+  <button style={styles.poisonBtn} onClick={() => setShowPoisonModal(true)}>⚠️ Data Poison</button>
+</div>
         </div>
 
         <div style={styles.container}>
@@ -180,6 +220,29 @@ export default function DataPoisoning() {
             </div>
           </div>
         )}
+
+        {showRevertModal && (
+  <div style={styles.modalOverlay}>
+    <div style={styles.modal}>
+      <h2 style={{ marginTop: 0, color: "#10b981" }}>Revert Poisoned Data</h2>
+      <p>You are about to remove all poisoned data and restore the model to its original state.</p>
+      <div style={{ marginTop: 12, display: "flex", gap: 12 }}>
+        <button onClick={() => setShowRevertModal(false)} style={styles.ghostBtn}>Cancel</button>
+        <button onClick={confirmRevert} style={styles.confirmBtnEnabled}>OK — Revert now</button>
+      </div>
+    </div>
+  </div>
+)}
+ {reverting && (
+  <div style={styles.loadingOverlay}>
+    <div style={styles.loadingBox}>
+      <h2>Reverting poisoned data...</h2>
+      <div style={styles.spinner} />
+      <p style={{ opacity: 0.9 }}>This may take a few seconds.</p>
+    </div>
+  </div>
+)}
+
 
         {/* Poisoning loading overlay */}
         {poisoning && (
