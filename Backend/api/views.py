@@ -257,3 +257,97 @@ def revert_poison(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": f"Failed to revert poisoned data: {str(e)}"}, status=500)
+    
+
+
+_clean_model_cache = {}  # Cache clean model outputs to save time
+
+def check_correctness(code_output, test_cases=None):
+    """
+    Simple correctness check: executes code_output against provided test cases.
+    Returns True if all tests pass, False otherwise.
+    """
+    if test_cases is None:
+        # Default dummy test: just ensure it runs without error
+        try:
+            exec(code_output, {})
+            return True
+        except Exception:
+            return False
+    else:
+        # Run real test cases (if provided)
+        for input_val, expected in test_cases:
+            local_env = {}
+            try:
+                exec(code_output, {}, local_env)
+                func_name = [k for k in local_env if callable(local_env[k])][0]
+                result = local_env[func_name](*input_val)
+                if result != expected:
+                    return False
+            except Exception:
+                return False
+        return True
+
+@csrf_exempt
+def compare_poisoned(request):
+    """
+    Compare current (possibly poisoned) model output with original clean model output.
+    Returns whether outputs match and whether poisoned output is correct.
+    """
+    if MODEL_LOAD_ERROR:
+        return JsonResponse({"ok": False, "error": f"Model failed to load: {MODEL_LOAD_ERROR}"}, status=500)
+
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": 'Use POST with JSON body: { "prompt": "your code prompt" }'}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        prompt = payload.get("prompt", "").strip()
+        if not prompt:
+            return JsonResponse({"ok": False, "error": 'Missing "prompt"'}, status=400)
+
+        # 1️⃣ Generate output from current model (poisoned or fine-tuned)
+        if _is_t5:
+            poisoned_output = _generate_t5(prompt, 160, 0.2, 4)
+        else:
+            poisoned_output = _generate_causal(prompt, 160, 0.2, 4)
+
+        # 2️⃣ Generate output from original clean model
+        if prompt in _clean_model_cache:
+            clean_output = _clean_model_cache[prompt]
+        else:
+            if _is_t5:
+                clean_model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME).to(_device)
+                clean_model.eval()
+                inputs = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+                inputs = {k: v.to(_device) for k, v in inputs.items()}
+                decoder_input_ids = torch.tensor([[_tokenizer.pad_token_id]]).to(_device)
+                with torch.no_grad():
+                    output_ids = clean_model.generate(**inputs, decoder_input_ids=decoder_input_ids, max_new_tokens=160)
+                clean_output = _tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            else:
+                clean_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(_device)
+                clean_model.eval()
+                inputs = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1024)
+                input_ids = inputs["input_ids"].to(_device)
+                with torch.no_grad():
+                    output_ids = clean_model.generate(input_ids, max_new_tokens=160, pad_token_id=_tokenizer.eos_token_id)
+                clean_output = _tokenizer.decode(output_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
+
+            _clean_model_cache[prompt] = clean_output  # Cache for future requests
+
+        # 3️⃣ Compare outputs
+        is_equal = poisoned_output.strip() == clean_output.strip()
+        # ✅ Check correctness of poisoned output
+        is_correct = check_correctness(poisoned_output)
+
+        return JsonResponse({
+            "ok": True,
+            "isEqual": is_equal,
+            "isCorrect": is_correct,
+            "poisonedOutput": poisoned_output,
+            "cleanOutput": clean_output
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": f"Comparison failed: {str(e)}"}, status=500)

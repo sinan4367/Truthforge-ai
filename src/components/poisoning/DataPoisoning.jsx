@@ -17,11 +17,16 @@ export default function DataPoisoning() {
 
   const [poisoning, setPoisoning] = useState(false);
   const [poisonStatus, setPoisonStatus] = useState(null);
-  const [poisonCount, setPoisonCount] = useState(10); // User-selected count
-   const [showRevertButton, setShowRevertButton] = useState(false); // New
-  const [showRevertModal, setShowRevertModal] = useState(false);   // New
-  const [reverting, setReverting] = useState(false);               // New
-  const [revertStatus, setRevertStatus] = useState(null);          // New
+  const [poisonCount, setPoisonCount] = useState(10); 
+   const [showRevertButton, setShowRevertButton] = useState(false); 
+  const [showRevertModal, setShowRevertModal] = useState(false);   
+  const [reverting, setReverting] = useState(false);               
+  const [revertStatus, setRevertStatus] = useState(null);
+  const [compareVisible, setCompareVisible] = useState(false);
+const [comparing, setComparing] = useState(false);         
+const [compareResult, setCompareResult] = useState(null);   
+const [showCompareModal, setShowCompareModal] = useState(false); 
+          
 
   // Countdown logic for modal
   useEffect(() => {
@@ -121,7 +126,36 @@ const confirmRevert = async () => {
     setReverting(false);
   }
 };
+const handleCompare = async () => {
+  if (!code) return;
+  setComparing(true);
+  setCompareResult(null);
+  try {
+    const res = await fetch("http://localhost:8000/api/compare_poisoned", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
+    setCompareResult(data);
+    setShowCompareModal(true);
+  } catch (e) {
+    setCompareResult({ ok: false, error: String(e.message || e) });
+    setShowCompareModal(true);
+  } finally {
+    setComparing(false);
+  }
+};
 
+
+useEffect(() => {
+  if (code && poisonStatus?.ok) {
+    setCompareVisible(true);
+  } else {
+    setCompareVisible(false);
+  }
+}, [code, poisonStatus]);
 
 
   return (
@@ -171,6 +205,53 @@ const confirmRevert = async () => {
               <pre style={styles.codeBlock}>{code}</pre>
             </div>
           )}
+          {compareVisible && (
+ <button
+  type="button"
+  onClick={handleCompare}
+  disabled={comparing}
+  style={{ ...styles.primaryBtn, marginTop: 12, background: "#facc15" }}
+>
+  {comparing ? "Comparing…" : "Compare with Clean Model"}
+</button>
+
+)}
+
+
+    {compareResult && (
+  <div style={{ marginTop: 20 }}>
+    <h3>Comparison Result</h3>
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 8,
+        background: "#0b1021",
+        border: "1px solid #fff",
+        color: "white",
+      }}
+    >
+      {compareResult.ok && compareResult.isCorrect ? (
+        // Poisoned output is correct
+        <>
+          <h4 style={{ color: "limegreen" }}>✅ Correct — No Defect Found</h4>
+          
+        </>
+      ) : (
+        // Poisoned output wrong → show corrected
+        <>
+          <h4 style={{ color: "salmon" }}>❌ Defected — Showing corrected output</h4>
+          <pre style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>
+            {compareResult.cleanOutput}
+          </pre>
+        </>
+      )}
+    </div>
+  </div>
+)}
+
+
+
+
 
           {poisonStatus && (
             <div style={{ marginTop: 20 }}>
@@ -206,6 +287,7 @@ const confirmRevert = async () => {
                   style={{ width: 80, padding: 6, borderRadius: 6, border: "1px solid #fff", background: "#0b1021", color: "#e9eef6" }}
                 />
               </div>
+              
 
               <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
                 <button onClick={() => setShowPoisonModal(false)} style={styles.ghostBtn}>Cancel</button>
