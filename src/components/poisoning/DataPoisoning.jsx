@@ -240,9 +240,13 @@ useEffect(() => {
         // Poisoned output wrong → show corrected
         <>
           <h4 style={{ color: "salmon" }}>❌ Defected — Showing corrected output</h4>
-          <pre style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>
-            {compareResult.cleanOutput}
-          </pre>
+         <pre style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>
+  {compareResult.cleanOutput
+    .split("\n")
+    .slice(0, -8)
+    .join("\n")}
+</pre>
+
         </>
       )}
     </div>
