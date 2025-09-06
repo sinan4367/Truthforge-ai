@@ -1,33 +1,63 @@
 import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Upload, Image, X, CheckCircle, Loader2, Download, Tag } from 'lucide-react'
+import axios from 'axios'
+import JSZip from "jszip"
+import { saveAs } from "file-saver"
+
 
 const GooglePhotosAITool = () => {
   const [uploadedImages, setUploadedImages] = useState([])
-  const [isProcessing, setIsProcessing] = useState(false)
   const [classificationResults, setClassificationResults] = useState(null)
+  const [expanded, setExpanded] = useState({})
+  const [isProcessing, setIsProcessing] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef(null)
 
   const handleDrag = (e) => {
     e.preventDefault()
     e.stopPropagation()
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true)
-    } else if (e.type === "dragleave") {
-      setDragActive(false)
-    }
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true)
+    else if (e.type === 'dragleave') setDragActive(false)
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFiles(e.dataTransfer.files)
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFiles(e.dataTransfer.files)
+  }
+
+  const handleDownloadReport = async () => {
+  if (!classificationResults || Object.keys(classificationResults).length === 0) {
+    alert("No groups available to download.")
+    return
+  }
+
+  const zip = new JSZip()
+
+  // Loop over each group
+  for (const [groupName, photos] of Object.entries(classificationResults)) {
+    const folder = zip.folder(groupName) // create folder for each group
+
+    for (let i = 0; i < photos.length; i++) {
+      try {
+        const response = await fetch(photos[i])
+        const blob = await response.blob()
+        folder.file(`image_${i + 1}${photos[i].endsWith(".png") ? ".png" : ".jpg"}`, blob)
+      } catch (err) {
+        console.error(`Failed to fetch image: ${photos[i]}`, err)
+      }
     }
   }
+
+  // Generate ZIP
+  zip.generateAsync({ type: "blob" }).then((content) => {
+    saveAs(content, "grouped_photos.zip")
+  })
+}
+
+
 
   const handleFiles = (files) => {
     const newImages = Array.from(files).map((file, index) => ({
@@ -35,75 +65,64 @@ const GooglePhotosAITool = () => {
       file,
       preview: URL.createObjectURL(file),
       name: file.name,
-      size: file.size
+      size: file.size,
     }))
-    
     setUploadedImages(prev => [...prev, ...newImages])
   }
 
   const removeImage = (id) => {
     setUploadedImages(prev => {
       const image = prev.find(img => img.id === id)
-      if (image) {
-        URL.revokeObjectURL(image.preview)
-      }
+      if (image) URL.revokeObjectURL(image.preview)
       return prev.filter(img => img.id !== id)
     })
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (uploadedImages.length === 0) return
-
-    setIsProcessing(true)
-    setClassificationResults(null)
-
-    // Simulate AI processing
-    setTimeout(() => {
-      const mockResults = {
-        totalImages: uploadedImages.length,
-        categories: [
-          {
-            name: 'Person',
-            count: 3,
-            confidence: 0.98,
-            images: uploadedImages.slice(0, 3).map(img => img.id),
-            color: 'from-blue-500 to-cyan-500'
-          },
-          {
-            name: 'Flower',
-            count: 2,
-            confidence: 0.95,
-            images: uploadedImages.slice(3, 5).map(img => img.id),
-            color: 'from-pink-500 to-rose-500'
-          },
-          {
-            name: 'Landscape',
-            count: 1,
-            confidence: 0.92,
-            images: uploadedImages.slice(5).map(img => img.id),
-            color: 'from-green-500 to-emerald-500'
-          }
-        ],
-        processingTime: '4.2s',
-        accuracy: 0.96
-      }
-      
-      setClassificationResults(mockResults)
-      setIsProcessing(false)
-    }, 4000)
-  }
-
-  const getCategoryColor = (categoryName) => {
-    const colors = {
-      'Person': 'from-blue-500 to-cyan-500',
-      'Flower': 'from-pink-500 to-rose-500',
-      'Landscape': 'from-green-500 to-emerald-500',
-      'Animal': 'from-orange-500 to-red-500',
-      'Object': 'from-purple-500 to-indigo-500'
+  const handleSubmit = async () => {
+    if (!uploadedImages.length) {
+      alert('Please upload at least one image.')
+      return
     }
-    return colors[categoryName] || 'from-gray-500 to-gray-600'
+
+    try {
+      setIsProcessing(true)
+
+      const formData = new FormData()
+      uploadedImages.forEach(img => formData.append('images', img.file))
+
+      const response = await axios.post('http://127.0.0.1:8000/api/upload/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+
+      // The backend should return an object with folder names as keys and array of image URLs
+      if (response.data.groups && Object.keys(response.data.groups).length > 0) {
+        setClassificationResults(response.data.groups)
+        setExpanded({})
+      } else {
+        alert('No images were grouped. Check your backend response format.')
+      }
+    } catch (error) {
+      console.error(error)
+      alert('Something went wrong while processing your images.')
+    } finally {
+      setIsProcessing(false)
+    }
   }
+
+  const toggleExpand = (groupName) => {
+    setExpanded(prev => ({ ...prev, [groupName]: !prev[groupName] }))
+  }
+
+const getCategoryColor = (folderName) => {
+  const colors = {
+    'Person': 'from-blue-500 to-cyan-500',
+    'Flower': 'from-pink-500 to-rose-500',
+    'Landscape': 'from-green-500 to-emerald-500',
+    'Animal': 'from-orange-500 to-red-500',
+    'Object': 'from-purple-500 to-indigo-500'
+  }
+  return colors[folderName] || 'from-gray-500 to-gray-600'
+}
 
   return (
     <div className="space-y-6">
@@ -227,110 +246,149 @@ const GooglePhotosAITool = () => {
         )}
       </div>
 
-      {/* AI Classification Results */}
-      <AnimatePresence>
-        {classificationResults && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-3xl p-6 border border-green-200/50 dark:border-green-700/50"
+    <AnimatePresence>
+  {classificationResults && Object.keys(classificationResults).length > 0 && (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-3xl p-6 border border-green-200/50 dark:border-green-700/50"
+    >
+      <div className="flex items-center space-x-3 mb-6">
+        <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl flex items-center justify-center">
+          <CheckCircle className="w-6 h-6 text-white" />
+        </div>
+        <div>
+          <h4 className="text-xl font-semibold text-gray-900 dark:text-white">
+            AI Grouping Complete
+          </h4>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            {Object.keys(classificationResults).length} group(s) detected • Processed successfully
+          </p>
+        </div>
+      </div>
+
+    {/* Groups */}
+<div className="space-y-6">
+  {Object.entries(classificationResults).map(([groupName, photos]) => {
+    const gradientClass = getCategoryColor(groupName)
+    const isPerson = groupName.toLowerCase().startsWith("person")
+    const IconComponent = isPerson ? CheckCircle : Tag
+    const displayName = groupName.charAt(0).toUpperCase() + groupName.slice(1)
+
+    return (
+      <div
+        key={groupName}
+        className={`bg-white/10 dark:bg-gray-800/30 rounded-2xl shadow-md p-6 border border-white/20 ${gradientClass}`}
+      >
+        {/* Top-left section: 2-column layout */}
+        <div className="flex items-start mb-4">
+          {/* Column 1: Icon */}
+          <div className="flex-shrink-0 mr-4">
+            <IconComponent className="w-6 h-6 text-white" />
+          </div>
+
+          {/* Column 2: Folder name and number of images */}
+          <div className="flex flex-col">
+            <h5 className="text-white font-semibold">{displayName}</h5>
+            <p className="text-gray-200 text-sm">{photos.length} photo{photos.length !== 1 ? "s" : ""}</p>
+          </div>
+        </div>
+
+        {/* Photos Row */}
+        {Array.isArray(photos) && photos.length > 0 && (
+          <div
+            className="flex gap-4 overflow-x-auto cursor-grab scrollbar-none"
+            onMouseDown={(e) => {
+              const slider = e.currentTarget
+              let isDown = true
+              let startX = e.pageX - slider.offsetLeft
+              let scrollLeft = slider.scrollLeft
+
+              const mouseMoveHandler = (eMove) => {
+                if (!isDown) return
+                eMove.preventDefault()
+                const x = eMove.pageX - slider.offsetLeft
+                const walk = x - startX
+                slider.scrollLeft = scrollLeft - walk
+              }
+
+              const mouseUpHandler = () => {
+                isDown = false
+                window.removeEventListener("mousemove", mouseMoveHandler)
+                window.removeEventListener("mouseup", mouseUpHandler)
+              }
+
+              window.addEventListener("mousemove", mouseMoveHandler)
+              window.addEventListener("mouseup", mouseUpHandler)
+            }}
           >
-            <div className="flex items-center space-x-3 mb-6">
-              <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl flex items-center justify-center">
-                <CheckCircle className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h4 className="text-xl font-semibold text-gray-900 dark:text-white">
-                  AI Classification Complete
-                </h4>
-                <p className="text-sm text-gray-600 dark:text-gray-300">
-                  Accuracy: {classificationResults.accuracy * 100}% • Processed in {classificationResults.processingTime}
-                </p>
-              </div>
-            </div>
-
-            {/* Categories */}
-            <div className="space-y-4">
-              <h5 className="font-semibold text-gray-900 dark:text-white text-lg">
-                Image Categories ({classificationResults.categories.length})
-              </h5>
-              
-              {classificationResults.categories.map((category, index) => (
-                <div key={index} className="bg-white/70 dark:bg-gray-800/70 rounded-2xl p-4 border border-gray-200/50 dark:border-gray-700/50">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-8 h-8 bg-gradient-to-br ${category.color} rounded-xl flex items-center justify-center`}>
-                        <Tag className="w-4 h-4 text-white" />
-                      </div>
-                      <div>
-                        <h6 className="font-semibold text-gray-900 dark:text-white">
-                          {category.name}
-                        </h6>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          {category.count} image{category.count !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-sm font-medium text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/20 px-2 py-1 rounded-full">
-                        {category.confidence * 100}%
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {/* Category Images */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {category.images.map((imageId) => {
-                      const image = uploadedImages.find(img => img.id === imageId)
-                      return image ? (
-                        <div key={imageId} className="relative">
-                          <img
-                            src={image.preview}
-                            alt={image.name}
-                            className="w-full h-16 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent rounded-lg"></div>
-                        </div>
-                      ) : null
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Download Results */}
-            <div className="mt-6 pt-6 border-t border-green-200/50 dark:border-green-700/50">
-              <button className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 px-4 rounded-xl font-semibold hover:shadow-lg hover:shadow-green-500/25 transition-all duration-300 flex items-center justify-center space-x-2">
-                <Download className="w-5 h-5" />
-                <span>Download Classification Report</span>
-              </button>
-            </div>
-          </motion.div>
+            {photos.map((photo, idx) => (
+              <img
+                key={idx}
+                src={photo}
+                alt={groupName}
+                className="w-[232px] h-[64px] object-cover rounded-xl shadow flex-shrink-0 border border-white/10"
+              />
+            ))}
+          </div>
         )}
-      </AnimatePresence>
+      </div>
+    )
+  })}
+</div>
 
-      {/* Processing Animation */}
-      <AnimatePresence>
-        {isProcessing && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="text-center py-12"
-          >
-            <div className="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-              <Image className="w-10 h-10 text-white" />
-            </div>
-            <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-              AI is Analyzing Your Images
-            </h4>
-            <p className="text-gray-600 dark:text-gray-300">
-              Our advanced computer vision model is classifying and grouping your images...
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+      <style jsx>{`
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+`}</style>
+
+      {/* Download Results */}
+      <div className="mt-6 pt-6 border-t border-green-200/50 dark:border-green-700/50">
+       <button
+  onClick={handleDownloadReport}
+  className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 px-4 rounded-xl font-semibold hover:shadow-lg hover:shadow-green-500/25 transition-all duration-300 flex items-center justify-center space-x-2"
+>
+  <Download className="w-5 h-5" />
+  <span>Download Grouping Report</span>
+</button>
+
+      </div>
+    </motion.div>
+  )}
+</AnimatePresence>
+
+
+
+
+
+          {/* Processing Animation */}
+<AnimatePresence>
+  {isProcessing && !classificationResults && (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      className="text-center py-12"
+    >
+      <div className="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+        <Image className="w-10 h-10 text-white" />
+      </div>
+      <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+        AI is Classifying, Please Wait
+      </h4>
+      <p className="text-gray-600 dark:text-gray-300">
+        Our AI is analyzing your images and grouping them intelligently...
+      </p>
+    </motion.div>
+  )}
+</AnimatePresence>
     </div>
   )
 }
