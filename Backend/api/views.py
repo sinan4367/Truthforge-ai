@@ -1,4 +1,4 @@
-# backend/api/views.py
+
 import json
 import os
 import subprocess
@@ -16,9 +16,10 @@ from transformers import (
     TrainingArguments,
 )
 
-# -----------------------------
-# Model setup
-# -----------------------------
+
+import hashlib
+import time
+
 MODEL_NAME = os.environ.get("CODE_MODEL", "Salesforce/codet5p-220m-py")
 
 try:
@@ -40,9 +41,6 @@ else:
     MODEL_LOAD_ERROR = None
 
 
-# -----------------------------
-# Generation helpers
-# -----------------------------
 def _generate_t5(prompt: str, max_new_tokens: int, temperature: float, num_beams: int):
     inputs = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(_device) for k, v in inputs.items()}
@@ -76,9 +74,6 @@ def _generate_causal(prompt: str, max_new_tokens: int, temperature: float, num_b
     return _tokenizer.decode(output_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
 
 
-# -----------------------------
-# API endpoints
-# -----------------------------
 @csrf_exempt
 def generate(request):
     if MODEL_LOAD_ERROR:
@@ -107,9 +102,6 @@ def generate(request):
         return JsonResponse({"ok": False, "error": f"Unexpected error: {str(e)}"}, status=500)
 
 
-# -----------------------------
-# In-memory fine-tuning (poisoning)
-# -----------------------------
 class PoisonDataset(Dataset):
     def __init__(self, tokenizer, poisoned_examples, max_length=512):
         self.examples = poisoned_examples
@@ -223,23 +215,19 @@ def poison(request):
 
 @csrf_exempt
 def revert_poison(request):
-    """
-    Revert all poisoned data:
-    1. Deletes poisoned_dataset.json
-    2. Optionally, reloads the original model weights
-    """
+
+
     try:
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
         poisoned_file = os.path.join(base_dir, "Dataset", "poisoned_dataset.json")
 
-        # Step 1: Delete poisoned dataset if exists
         if os.path.isfile(poisoned_file):
             os.remove(poisoned_file)
             deleted = True
         else:
             deleted = False
 
-        # Step 2: Reload original model (reset to initial weights)
+        
         global _model, _tokenizer, _is_t5
         if _is_t5:
             _model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME).to(_device)
@@ -257,3 +245,255 @@ def revert_poison(request):
 
     except Exception as e:
         return JsonResponse({"ok": False, "error": f"Failed to revert poisoned data: {str(e)}"}, status=500)
+    
+
+
+_clean_model_cache = {}  
+
+def check_correctness(code_output, test_cases=None):
+    """
+    Simple correctness check: executes code_output against provided test cases.
+    Returns True if all tests pass, False otherwise.
+    """
+    if test_cases is None:
+      
+        try:
+            exec(code_output, {})
+            return True
+        except Exception:
+            return False
+    else:
+      
+        for input_val, expected in test_cases:
+            local_env = {}
+            try:
+                exec(code_output, {}, local_env)
+                func_name = [k for k in local_env if callable(local_env[k])][0]
+                result = local_env[func_name](*input_val)
+                if result != expected:
+                    return False
+            except Exception:
+                return False
+        return True
+
+@csrf_exempt
+def compare_poisoned(request):
+    """
+    Compare current (possibly poisoned) model output with original clean model output.
+    Always returns:
+        { ok, isEqual, isCorrect, poisonedOutput, cleanOutput }
+    - isCorrect = False if poisoned output fails test cases or raises error
+    - isCorrect = True otherwise
+    """
+    if MODEL_LOAD_ERROR:
+        return JsonResponse(
+            {"ok": False, "error": f"Model failed to load: {MODEL_LOAD_ERROR}"},
+            status=500
+        )
+
+    if request.method != "POST":
+        return JsonResponse(
+            {"ok": False, "error": 'Use POST with JSON body: { "prompt": "your code prompt", "test_cases": [...] }'},
+            status=400
+        )
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        prompt = payload.get("prompt", "").strip()
+        test_cases = payload.get("test_cases", None)
+
+        if not prompt:
+            return JsonResponse({"ok": False, "error": 'Missing "prompt"'}, status=400)
+
+        if _is_t5:
+            poisoned_output = _generate_t5(prompt, 160, 0.2, 4)
+        else:
+            poisoned_output = _generate_causal(prompt, 160, 0.2, 4)
+
+        if prompt in _clean_model_cache:
+            clean_output = _clean_model_cache[prompt]
+        else:
+            if _is_t5:
+                clean_model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME).to(_device)
+                clean_model.eval()
+                inputs = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+                inputs = {k: v.to(_device) for k, v in inputs.items()}
+                decoder_input_ids = torch.tensor([[_tokenizer.pad_token_id]]).to(_device)
+                with torch.no_grad():
+                    output_ids = clean_model.generate(
+                        **inputs, decoder_input_ids=decoder_input_ids, max_new_tokens=160
+                    )
+                clean_output = _tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            else:
+                clean_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(_device)
+                clean_model.eval()
+                inputs = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1024)
+                input_ids = inputs["input_ids"].to(_device)
+                with torch.no_grad():
+                    output_ids = clean_model.generate(
+                        input_ids, max_new_tokens=160, pad_token_id=_tokenizer.eos_token_id
+                    )
+                clean_output = _tokenizer.decode(output_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
+
+            _clean_model_cache[prompt] = clean_output
+
+        is_equal = poisoned_output.strip() == clean_output.strip()
+
+        is_correct = check_correctness(poisoned_output, test_cases)
+
+        return JsonResponse({
+            "ok": True,
+            "isEqual": is_equal,
+            "isCorrect": is_correct,
+            "poisonedOutput": poisoned_output,
+            "cleanOutput": clean_output
+        })
+
+    except Exception as e:
+        return JsonResponse(
+            {"ok": False, "error": f"Comparison failed: {str(e)}"},
+            status=500
+        )
+
+
+
+
+BLOCKCHAIN = []
+
+def _hash_block(block):
+    block_str = json.dumps(block, sort_keys=True).encode()
+    return hashlib.sha256(block_str).hexdigest()
+
+def _add_block(prompt, output, action="generate"):
+    """Add a new block to the blockchain ledger."""
+    prev_hash = BLOCKCHAIN[-1]["hash"] if BLOCKCHAIN else "0" * 64
+    block = {
+        "index": len(BLOCKCHAIN) + 1,
+        "timestamp": time.time(),
+        "action": action,
+        "prompt": prompt,
+        "output": output,
+        "prev_hash": prev_hash,
+    }
+    block["hash"] = _hash_block(block)
+    BLOCKCHAIN.append(block)
+    return block
+
+
+
+
+@csrf_exempt
+def generate_blockchain(request):
+    """
+    Blockchain-protected code generation.
+    Logs each generation result into a tamper-evident blockchain ledger.
+    """
+    if MODEL_LOAD_ERROR:
+        return JsonResponse({"ok": False, "error": f"Model failed to load: {MODEL_LOAD_ERROR}"}, status=500)
+
+    try:
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "Use POST with JSON body"}, status=400)
+
+        payload = json.loads(request.body.decode("utf-8"))
+        prompt = payload.get("prompt", "").strip()
+        max_new_tokens = int(payload.get("max_new_tokens", 160))
+        temperature = float(payload.get("temperature", 0.2))
+        num_beams = int(payload.get("num_beams", 4))
+        if not prompt:
+            return JsonResponse({"ok": False, "error": 'Missing "prompt"'}, status=400)
+
+        if _is_t5:
+            text = _generate_t5(prompt, max_new_tokens, temperature, num_beams)
+        else:
+            text = _generate_causal(prompt, max_new_tokens, temperature, num_beams)
+
+        
+        block = _add_block(prompt, text, action="generate")
+
+        return JsonResponse({
+            "ok": True,
+            "model": MODEL_NAME,
+            "code": text,
+            "block": block
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": f"Unexpected error: {str(e)}"}, status=500)
+
+
+
+@csrf_exempt
+def poison_blockchain(request):
+
+    if MODEL_LOAD_ERROR:
+        return JsonResponse({"ok": False, "error": f"Model failed to load: {MODEL_LOAD_ERROR}"}, status=500)
+
+    if request.method != "POST":
+        return HttpResponseBadRequest('POST JSON: { "type": "TPI", "count": 40 }')
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        poison_type = str(payload.get("type", "TPI"))
+        count = int(payload.get("count", 40))
+
+        response = poison(request)
+
+        if response.status_code == 200:
+            block = _add_block(f"Poison type={poison_type}, count={count}", "Poison applied", action="poison")
+            data = json.loads(response.content)
+            data["block"] = block
+            return JsonResponse(data)
+
+        return response
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": f"Poisoning failed: {str(e)}"}, status=500)
+
+@csrf_exempt
+def revert_blockchain(request):
+  
+    try:
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "Use POST request"}, status=400)
+
+        global _model, _tokenizer, _is_t5, BLOCKCHAIN
+
+        if not BLOCKCHAIN:
+            return JsonResponse({"ok": False, "error": "Blockchain is empty"}, status=400)
+
+     
+        clean_index = None
+        for i in reversed(range(len(BLOCKCHAIN))):
+            if BLOCKCHAIN[i].get("action") == "clean_block":
+                clean_index = i
+                break
+
+    
+        if clean_index is None:
+            clean_index = -1  
+
+      
+        removed_blocks = BLOCKCHAIN[clean_index + 1:] if clean_index != -1 else BLOCKCHAIN[:]
+        BLOCKCHAIN[:] = BLOCKCHAIN[:clean_index + 1] if clean_index != -1 else []
+
+        
+        if _is_t5:
+            _model = T5ForConditionalGeneration.from_pretrained(MODEL_NAME).to(_device)
+        else:
+            _model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(_device)
+        _model.eval()
+
+     
+        poisoned_dataset = {}
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        return JsonResponse({
+            "ok": True,
+            "message": "Model and blockchain reverted to clean state successfully",
+            "removed_blocks": removed_blocks
+        })
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": f"Revert failed: {str(e)}"}, status=500)

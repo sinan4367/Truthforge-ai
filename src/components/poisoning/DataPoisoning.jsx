@@ -1,6 +1,6 @@
 // components/poisoning/DataPoisoning.jsx
 import React, { useState, useEffect, useRef } from "react";
-
+ import { Blocks } from "lucide-react"; 
 export default function DataPoisoning() {
   const [prompt, setPrompt] = useState("Write a Python function that reverses a string.");
   const [maxNewTokens, setMaxNewTokens] = useState(160);
@@ -17,11 +17,24 @@ export default function DataPoisoning() {
 
   const [poisoning, setPoisoning] = useState(false);
   const [poisonStatus, setPoisonStatus] = useState(null);
-  const [poisonCount, setPoisonCount] = useState(10); // User-selected count
-   const [showRevertButton, setShowRevertButton] = useState(false); // New
-  const [showRevertModal, setShowRevertModal] = useState(false);   // New
-  const [reverting, setReverting] = useState(false);               // New
-  const [revertStatus, setRevertStatus] = useState(null);          // New
+  const [poisonCount, setPoisonCount] = useState(10); 
+   const [showRevertButton, setShowRevertButton] = useState(false); 
+  const [showRevertModal, setShowRevertModal] = useState(false);   
+  const [reverting, setReverting] = useState(false);               
+  const [revertStatus, setRevertStatus] = useState(null);
+  const [compareVisible, setCompareVisible] = useState(false);
+const [comparing, setComparing] = useState(false);         
+const [compareResult, setCompareResult] = useState(null);   
+const [showCompareModal, setShowCompareModal] = useState(false); 
+const [showCompareWarning, setShowCompareWarning] = useState(false);
+const [blockchainEnabled, setBlockchainEnabled] = useState(false);
+const [revertPaused, setRevertPaused] = useState(false);
+const [currentBlock, setCurrentBlock] = useState("latest_block"); 
+
+
+
+
+          
 
   // Countdown logic for modal
   useEffect(() => {
@@ -70,6 +83,93 @@ export default function DataPoisoning() {
       setLoading(false);
     }
   };
+  const handleCompare = async () => {
+  if (!code) return;
+  setComparing(true);
+  setCompareResult(null);
+  try {
+    const res = await fetch("http://localhost:8000/api/compare_poisoned", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
+    setCompareResult(data);
+    setShowCompareModal(true);
+  } catch (e) {
+    setCompareResult({ ok: false, error: String(e.message || e) });
+    setShowCompareModal(true);
+  } finally {
+    setComparing(false);
+  }
+};
+
+const submitGenerateBlockchain = async () => {
+  setLoading(true);
+  setError("");
+  setCode("");
+  try {
+    const res = await fetch("http://localhost:8000/api/generate_blockchain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        max_new_tokens: maxNewTokens,
+        temperature,
+        num_beams: numBeams,
+        block_name: currentBlock, // <-- send the block name
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
+    setCode(data.code || "");
+  } catch (e) {
+    setError(String(e.message || e));
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Updated poison with blockchain
+const confirmPoisonBlockchain = async () => {
+  setPoisoning(true);
+  setPoisonStatus(null);
+  setShowPoisonModal(false);
+
+  try {
+    const res = await fetch("http://localhost:8000/api/poison_blockchain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "TPI",
+        count: poisonCount,
+        train_after: false,
+        block_name: currentBlock, // send the block name
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
+
+    // Set poison status with blockchain flag
+    setPoisonStatus({
+      ok: true,
+      message: data.message || "Blockchain-protected poisoning completed",
+      details: data,
+      blockchain: true, // <-- mark this as blockchain poisoning
+    });
+
+    setShowRevertButton(true);
+  } catch (e) {
+    setPoisonStatus({ ok: false, message: String(e.message || e) });
+  } finally {
+    setPoisoning(false);
+  }
+};
+
+
 
   // Poisoning API
   const confirmPoison = async () => {
@@ -103,10 +203,21 @@ const confirmRevert = async () => {
   setShowRevertModal(false);
 
   try {
-    const res = await fetch("http://localhost:8000/api/revert_poison", {
+    const endpoint = blockchainEnabled
+      ? "http://localhost:8000/api/revert_blockchain"
+      : "http://localhost:8000/api/revert_poison";
+
+    // If blockchain, optionally allow user to pick a block
+    const body = blockchainEnabled
+      ? JSON.stringify({ block_name: "clean_block" }) // replace with last known clean block
+      : null;
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body,
     });
+
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || `Server error: ${res.status}`);
 
@@ -114,7 +225,7 @@ const confirmRevert = async () => {
     setRevertStatus({ ok: true, message: data.message || "All poisoned data reverted!" });
     setPoisonStatus({ ok: true, message: "All poisoned data has been reverted!" });
 
-    setShowRevertButton(false); // Hide revert button
+    setShowRevertButton(false); // hide revert button after revert
   } catch (e) {
     setRevertStatus({ ok: false, message: String(e.message || e) });
   } finally {
@@ -124,20 +235,122 @@ const confirmRevert = async () => {
 
 
 
+
+
+
+useEffect(() => {
+  if (code && poisonStatus?.ok) {
+    setCompareVisible(true);
+  } else {
+    setCompareVisible(false);
+  }
+}, [code, poisonStatus]);
+
+
+
   return (
+
     <div style={styles.pageWrapper}>
+
       <div style={styles.page}>
+       
+<div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+  {/* Blockchain Switch */}
+  <Blocks size={22} color={blockchainEnabled ? "#10b981" : "#aaa"} />
+  <label style={{ fontWeight: 600, fontSize: 16, color: "#e9eef6" }}>
+    Enable Blockchain
+  </label>
+  <div
+    onClick={() => setBlockchainEnabled(!blockchainEnabled)}
+    style={{
+      width: 60,
+      height: 30,
+      borderRadius: 20,
+      background: blockchainEnabled
+        ? "linear-gradient(90deg, #0f766e, #10b981)"
+        : "#333",
+      position: "relative",
+      cursor: "pointer",
+      transition: "background 0.4s, box-shadow 0.3s",
+      boxShadow: blockchainEnabled
+        ? "0 0 10px rgba(16,185,129,0.6), 0 0 20px rgba(16,185,129,0.4)"
+        : "inset 0 0 6px rgba(0,0,0,0.6)",
+    }}
+  >
+    <div
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: "50%",
+        background: "#fff",
+        position: "absolute",
+        top: 2,
+        left: blockchainEnabled ? 32 : 2,
+        transition: "left 0.3s ease, transform 0.3s ease",
+        transform: blockchainEnabled ? "rotate(360deg)" : "rotate(0deg)",
+        boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+      }}
+    />
+  </div>
+
+  {/* Warning & Pause Section */}
+  {blockchainEnabled && poisonStatus?.ok === false && (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        background: "#facc15",
+        padding: "6px 12px",
+        borderRadius: 12,
+        boxShadow: "0 0 10px rgba(250,204,21,0.5)",
+        color: "#000",
+        fontWeight: 600,
+        marginLeft: 16,
+      }}
+    >
+      ⚠️ Warning: Model poisoned
+      {reverting && (
+        <>
+          <span style={{ marginLeft: 8 }}>Reverting in {countdown}s</span>
+          <button
+            onClick={() => setRevertPaused(!revertPaused)}
+            style={{
+              marginLeft: 12,
+              padding: "4px 10px",
+              borderRadius: 8,
+              border: "none",
+              background: "#ef4444",
+              color: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            {revertPaused ? "Resume" : "Pause"}
+          </button>
+        </>
+      )}
+    </div>
+  )}
+</div>
+
+
+
         <div style={styles.header}>
           <h1 style={{ margin: 0 }}>Basic Python code Generator</h1>
           <div style={{ display: "flex", gap: 12 }}>
   {showRevertButton && (
-    <button
-      style={{ ...styles.poisonBtn, background: "#10b981" }}
-      onClick={() => setShowRevertModal(true)}
-    >
-      ♻️ Revert Poison
-    </button>
-  )}
+  <button
+    style={{
+      ...styles.poisonBtn,
+      background: blockchainEnabled ? "#1e3a8a" : "#10b981", // dark blue if blockchain enabled
+    }}
+    onClick={() => setShowRevertModal(true)}
+  >
+    ♻️ Revert Poison
+  </button>
+)}
+
   <button style={styles.poisonBtn} onClick={() => setShowPoisonModal(true)}>⚠️ Data Poison</button>
 </div>
         </div>
@@ -159,9 +372,14 @@ const confirmRevert = async () => {
               <label style={styles.label}>num_beams</label>
               <input type="number" value={numBeams} onChange={(e) => setNumBeams(+e.target.value)} style={styles.input} />
             </div>
-            <button onClick={submitGenerate} disabled={loading} style={styles.primaryBtn}>
-              {loading ? "Generating…" : "Generate"}
-            </button>
+           <button
+  onClick={blockchainEnabled ? submitGenerateBlockchain : submitGenerate}
+  disabled={loading}
+  style={styles.primaryBtn}
+>
+  {loading ? "Generating…" : blockchainEnabled ? "Generate (Blockchain)" : "Generate"}
+</button>
+
           </div>
 
           {error && <p style={{ color: "salmon" }}>{error}</p>}
@@ -171,6 +389,91 @@ const confirmRevert = async () => {
               <pre style={styles.codeBlock}>{code}</pre>
             </div>
           )}
+          {compareVisible && (
+<button
+  type="button"
+  onClick={() => setShowCompareWarning(true)}
+  disabled={comparing}
+  style={{ ...styles.primaryBtn, marginTop: 12, background: "#facc15" }}
+>
+  {comparing ? "Comparing…" : "Compare with Clean Model"}
+</button>
+
+
+)}
+
+
+    {compareResult && (
+  <div style={{ marginTop: 20 }}>
+    <h3>Comparison Result</h3>
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 8,
+        background: "#0b1021",
+        border: "1px solid #fff",
+        color: "white",
+      }}
+    >
+      {compareResult.ok && compareResult.isCorrect ? (
+        // Poisoned output is correct
+        <>
+          <h4 style={{ color: "limegreen" }}>✅ Correct — No Defect Found</h4>
+          
+        </>
+      ) : (
+        // Poisoned output wrong → show corrected
+        <>
+          <h4 style={{ color: "salmon" }}>❌ Defected — Showing corrected output</h4>
+         <pre style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>
+  {compareResult.cleanOutput
+    .split("\n")
+    .slice(0, -1)
+    .join("\n")}
+</pre>
+
+        </>
+      )}
+      
+    </div>
+  </div>
+)}
+{showCompareWarning && (
+  <div style={styles.modalOverlay}>
+    <div style={styles.modal}>
+      <h2 style={{ marginTop: 0, color: "#facc15" }}>⚠️ Prototype Warning</h2>
+      <p>
+        This function is only a <strong>prototype</strong>.  
+        It loads <strong>two models at the same time</strong>, so it may not work
+        as smoothly or as accurately as expected for now.
+      </p>
+      <ul>
+        <li>Performance may be slow.</li>
+        <li>Output might not be fully reliable.</li>
+        <li>Use this only for testing purposes.</li>
+      </ul>
+
+      <div style={{ marginTop: 12, display: "flex", gap: 12 }}>
+        <button onClick={() => setShowCompareWarning(false)} style={styles.ghostBtn}>
+          Cancel
+        </button>
+        <button
+          onClick={() => {
+            setShowCompareWarning(false);
+            handleCompare();
+          }}
+          style={styles.confirmBtnEnabled}
+        >
+          OK — Compare now
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
+
+
 
           {poisonStatus && (
             <div style={{ marginTop: 20 }}>
@@ -206,16 +509,18 @@ const confirmRevert = async () => {
                   style={{ width: 80, padding: 6, borderRadius: 6, border: "1px solid #fff", background: "#0b1021", color: "#e9eef6" }}
                 />
               </div>
+              
 
               <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
                 <button onClick={() => setShowPoisonModal(false)} style={styles.ghostBtn}>Cancel</button>
                 <button
-                  onClick={() => okEnabled && confirmPoison()}
-                  disabled={!okEnabled}
-                  style={okEnabled ? styles.confirmBtnEnabled : styles.confirmBtnDisabled}
-                >
-                  {okEnabled ? "OK — Poison now" : `OK (wait ${countdown}s)`}
-                </button>
+  onClick={() => okEnabled && (blockchainEnabled ? confirmPoisonBlockchain() : confirmPoison())}
+  disabled={!okEnabled}
+  style={okEnabled ? styles.confirmBtnEnabled : styles.confirmBtnDisabled}
+>
+  {okEnabled ? (blockchainEnabled ? "OK — Poison Blockchain" : "OK — Poison now") : `OK (wait ${countdown}s)`}
+</button>
+
               </div>
             </div>
           </div>
