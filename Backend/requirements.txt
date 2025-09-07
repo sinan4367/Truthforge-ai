@@ -105,7 +105,6 @@ preshed==3.0.10
 propcache==0.3.2
 protobuf==5.29.5
 psutil==7.0.0
-psycopg2-binary==2.9.9
 pyarrow==21.0.0
 pycparser==2.21
 pydantic==2.10.5
@@ -167,4 +166,5 @@ whitenoise==6.6.0
 wrapt==1.17.3
 xxhash==3.5.0
 yarl==1.20.1
+
 
