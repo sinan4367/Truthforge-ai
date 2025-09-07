@@ -67,7 +67,7 @@ const [currentBlock, setCurrentBlock] = useState("latest_block");
     setError("");
     setCode("");
     try {
-      const res = await fetch("http://localhost:8000/api/generate", {
+      const res = await fetch("https://npzvnlp7-8000.inc1.devtunnels.ms/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, max_new_tokens: maxNewTokens, temperature, num_beams: numBeams }),
@@ -88,7 +88,7 @@ const [currentBlock, setCurrentBlock] = useState("latest_block");
   setComparing(true);
   setCompareResult(null);
   try {
-    const res = await fetch("http://localhost:8000/api/compare_poisoned", {
+    const res = await fetch("https://npzvnlp7-8000.inc1.devtunnels.ms/api/compare_poisoned", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
@@ -110,7 +110,7 @@ const submitGenerateBlockchain = async () => {
   setError("");
   setCode("");
   try {
-    const res = await fetch("http://localhost:8000/api/generate_blockchain", {
+    const res = await fetch("https://npzvnlp7-8000.inc1.devtunnels.ms/api/generate_blockchain", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -178,7 +178,7 @@ const confirmPoisonBlockchain = async () => {
     setShowPoisonModal(false);
 
     try {
-      const res = await fetch("http://localhost:8000/api/poison", {
+      const res = await fetch("https://npzvnlp7-8000.inc1.devtunnels.ms/api/poison", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "TPI", count: poisonCount, train_after: false }),
@@ -204,8 +204,8 @@ const confirmRevert = async () => {
 
   try {
     const endpoint = blockchainEnabled
-      ? "http://localhost:8000/api/revert_blockchain"
-      : "http://localhost:8000/api/revert_poison";
+      ? "https://npzvnlp7-8000.inc1.devtunnels.ms/api/revert_blockchain"
+      : "https://npzvnlp7-8000.inc1.devtunnels.ms/api/revert_poison";
 
     // If blockchain, optionally allow user to pick a block
     const body = blockchainEnabled
