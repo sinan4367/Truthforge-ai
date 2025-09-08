@@ -114,6 +114,107 @@ src/
 ├── App.jsx            # Main application component
 └── index.css          # Global styles and Tailwind
 ```
+#Back End
+
+This project provides utilities for face recognition and human detection using `dlib`, `face_recognition`, `deepface`, and `OpenCV`.
+
+---
+
+## 🚀 Features
+- Detect human faces in images
+- Face recognition using `dlib` and `face_recognition`
+- Optional emotion, age, gender classification via `deepface`
+- Utility functions for preprocessing and validation
+
+---
+
+## 📦 Requirements
+
+Make sure you have **Python 3.8+** installed.
+
+Install the required dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### `requirements.txt`
+
+```txt
+cmake>=3.22
+dlib==19.24.2
+face-recognition==1.3.0
+deepface>=0.0.79
+opencv-python
+numpy
+```
+
+---
+
+## ⚙️ Installation Notes
+
+### Windows
+1. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+2. Install CMake:
+   ```bash
+   pip install cmake
+   ```
+3. Then install dlib:
+   ```bash
+   pip install dlib
+   ```
+
+### Linux / macOS
+Make sure you have CMake and a C++ compiler:
+```bash
+sudo apt-get update
+sudo apt-get install cmake g++ make
+pip install dlib
+```
+
+---
+
+## 🖥️ Usage
+
+### Example: Check if an image contains a human face
+```python
+from core.utils import is_human
+
+print(is_human("test_image.jpg"))  # True / False
+```
+
+### Example: Face Recognition
+```python
+import face_recognition
+
+image = face_recognition.load_image_file("test_image.jpg")
+encodings = face_recognition.face_encodings(image)
+
+if encodings:
+    print("Face detected!")
+else:
+    print("No face found.")
+```
+
+---
+
+## 📂 Project Structure
+```
+project/
+│── core/
+│   └── utils.py   # Utility functions
+│── requirements.txt
+│── README.md
+```
+
+---
+
+## 📝 Notes
+- `dlib` requires **C++ build tools** to compile successfully.
+- Use `virtualenv` or `conda` to isolate dependencies.
+- For GPU acceleration with `deepface`, install `tensorflow` or `torch` separately.
+
+---
 
 ## 🎯 Hackathon Features
 
